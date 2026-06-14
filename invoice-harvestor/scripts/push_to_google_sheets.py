@@ -15,16 +15,21 @@ import os
 import re
 import sys
 from collections import OrderedDict
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from dotenv import load_dotenv
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
+from dotenv import load_dotenv, find_dotenv
 
+load_dotenv(find_dotenv())
 
-PROJECT_DIR = Path(__file__).resolve().parent
-DEFAULT_INPUT_FILE = PROJECT_DIR / "invoice_items.csv"
+SCRIPT_DIR = Path(__file__).resolve().parent  # Points to 'scripts/'
+SKILL_ROOT = SCRIPT_DIR.parent
+ASSETS_DIR = SKILL_ROOT / "assets"
+TEMP_DIR = ASSETS_DIR / "temp"
+DEFAULT_INPUT_FILE = TEMP_DIR / "invoice_items.csv"
 DEFAULT_SHEET_COLUMNS = "A:E"
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
@@ -33,8 +38,17 @@ class SheetsPushError(RuntimeError):
     pass
 
 
+@dataclass
+class PushResult:
+    """Result of pushing invoice items to Google Sheets."""
+
+    rows_updated: int
+    sheets_modified: list[str]
+    replace: bool
+
+
 def parse_args() -> argparse.Namespace:
-    load_dotenv(PROJECT_DIR / ".env")
+    load_dotenv(ASSETS_DIR / ".env")
 
     parser = argparse.ArgumentParser(
         description="Push invoice_items.csv to a Google Sheet."
@@ -76,7 +90,7 @@ def project_path(path_text: str) -> Path:
     path = Path(path_text)
     if path.is_absolute():
         return path
-    return PROJECT_DIR / path
+    return SCRIPT_DIR / path
 
 
 def read_csv_rows(csv_path: Path) -> tuple[list[str], list[list[str]]]:
@@ -142,7 +156,9 @@ def month_range(sheet_name: str, columns: str) -> str:
 
 def sheets_service(service_account_file: Path):
     if not service_account_file.exists():
-        raise SheetsPushError(f"Service account JSON file does not exist: {service_account_file}")
+        raise SheetsPushError(
+            f"Service account JSON file does not exist: {service_account_file}"
+        )
 
     credentials = Credentials.from_service_account_file(
         service_account_file,
@@ -152,22 +168,21 @@ def sheets_service(service_account_file: Path):
 
 
 def existing_sheet_titles(service, sheet_id: str) -> set[str]:
-    spreadsheet = service.spreadsheets().get(
-        spreadsheetId=sheet_id,
-        fields="sheets.properties.title",
-    ).execute()
-    return {
-        sheet["properties"]["title"]
-        for sheet in spreadsheet.get("sheets", [])
-    }
+    spreadsheet = (
+        service.spreadsheets()
+        .get(
+            spreadsheetId=sheet_id,
+            fields="sheets.properties.title",
+        )
+        .execute()
+    )
+    return {sheet["properties"]["title"] for sheet in spreadsheet.get("sheets", [])}
 
 
 def ensure_sheets(service, sheet_id: str, sheet_names: list[str]) -> set[str]:
     existing_titles = existing_sheet_titles(service, sheet_id)
     created_titles = {
-        sheet_name
-        for sheet_name in sheet_names
-        if sheet_name not in existing_titles
+        sheet_name for sheet_name in sheet_names if sheet_name not in existing_titles
     }
     requests = [
         {"addSheet": {"properties": {"title": sheet_name}}}
@@ -219,47 +234,86 @@ def push_rows(
     return updated_row_count(result)
 
 
+def push_to_sheets_core(
+    csv_file: str | Path = DEFAULT_INPUT_FILE,
+    service_account_file: str | Path | None = None,
+    sheet_id: str | None = None,
+    range_columns_var: str = DEFAULT_SHEET_COLUMNS,
+    replace: bool = False,
+    include_header: bool = False,
+) -> PushResult:
+    """
+    Core push function - uploads invoice items to Google Sheets.
+
+    Returns a PushResult with rows updated, sheets modified, and replace flag.
+    """
+    if not service_account_file:
+        raise SheetsPushError(
+            "Missing service_account_file. Provide via parameter or GOOGLE_SERVICE_ACCOUNT_FILE env var."
+        )
+    if not sheet_id:
+        raise SheetsPushError(
+            "Missing sheet_id. Provide via parameter or GOOGLE_SHEET_ID env var."
+        )
+
+    csv_path = project_path(csv_file)
+    service_account_path = project_path(service_account_file)
+
+    header, data_rows = read_csv_rows(csv_path)
+    if not data_rows:
+        raise SheetsPushError(f"No data rows found in {csv_path}")
+
+    grouped_rows = group_rows_by_month(header, data_rows)
+    columns = range_columns(range_columns_var)
+    service = sheets_service(service_account_path)
+    created_sheets = ensure_sheets(service, sheet_id, list(grouped_rows))
+
+    updated_rows = 0
+    sheets_modified = []
+
+    for sheet_name, month_rows in grouped_rows.items():
+        rows = month_rows
+        if replace or include_header or sheet_name in created_sheets:
+            rows = [header] + month_rows
+        target_range = month_range(sheet_name, columns)
+        month_updated_rows = push_rows(
+            service=service,
+            sheet_id=sheet_id,
+            target_range=target_range,
+            rows=rows,
+            replace=replace,
+        )
+        updated_rows += month_updated_rows
+        sheets_modified.append(sheet_name)
+        print(f"{sheet_name}: pushed {month_updated_rows} row(s)")
+
+    return PushResult(
+        rows_updated=updated_rows,
+        sheets_modified=sheets_modified,
+        replace=replace,
+    )
+
+
 def main() -> int:
     args = parse_args()
 
     try:
-        if not args.service_account_file:
-            raise SheetsPushError("Missing GOOGLE_SERVICE_ACCOUNT_FILE in .env or --service-account-file.")
-        if not args.sheet_id:
-            raise SheetsPushError("Missing GOOGLE_SHEET_ID in .env or --sheet-id.")
-
-        csv_path = project_path(args.input)
-        service_account_file = project_path(args.service_account_file)
-        header, data_rows = read_csv_rows(csv_path)
-        if not data_rows:
-            raise SheetsPushError(f"No data rows found in {csv_path}")
-
-        grouped_rows = group_rows_by_month(header, data_rows)
-        columns = range_columns(args.range)
-        service = sheets_service(service_account_file)
-        created_sheets = ensure_sheets(service, args.sheet_id, list(grouped_rows))
-
-        updated_rows = 0
-        for sheet_name, month_rows in grouped_rows.items():
-            rows = month_rows
-            if args.replace or args.include_header or sheet_name in created_sheets:
-                rows = [header] + month_rows
-            target_range = month_range(sheet_name, columns)
-            month_updated_rows = push_rows(
-                service=service,
-                sheet_id=args.sheet_id,
-                target_range=target_range,
-                rows=rows,
-                replace=args.replace,
-            )
-            updated_rows += month_updated_rows
-            print(f"{sheet_name}: pushed {month_updated_rows} row(s)")
+        result = push_to_sheets_core(
+            csv_file=args.input,
+            service_account_file=args.service_account_file,
+            sheet_id=args.sheet_id,
+            range_columns=args.range,
+            replace=args.replace,
+            include_header=args.include_header,
+        )
     except SheetsPushError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
-    action = "Replaced" if args.replace else "Appended"
-    print(f"{action} {updated_rows} total row(s) across {len(grouped_rows)} monthly sheet(s).")
+    action = "Replaced" if result.replace else "Appended"
+    print(
+        f"{action} {result.rows_updated} total row(s) across {len(result.sheets_modified)} monthly sheet(s)."
+    )
     return 0
 
 

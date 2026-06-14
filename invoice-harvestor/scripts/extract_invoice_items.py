@@ -18,10 +18,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable
 
-
-PROJECT_DIR = Path(__file__).resolve().parent
-DEFAULT_INPUT_DIR = PROJECT_DIR / "attachments"
-DEFAULT_OUTPUT_FILE = PROJECT_DIR / "invoice_items.csv"
+SCRIPT_DIR = Path(__file__).resolve().parent  # Points to 'scripts/'
+SKILL_ROOT = SCRIPT_DIR.parent
+ASSETS_DIR = SKILL_ROOT / "assets"
+TEMP_DIR = ASSETS_DIR / "temp"
+DEFAULT_INPUT_DIR = TEMP_DIR
+DEFAULT_OUTPUT_FILE = TEMP_DIR / "invoice_items.csv"
 
 
 class ExtractError(RuntimeError):
@@ -35,6 +37,15 @@ class InvoiceItem:
     description: str
     quantity: str
     amount: str
+
+
+@dataclass
+class ExtractResult:
+    """Result of extracting invoice items from PDFs."""
+
+    count: int
+    csv_path: Path
+    items: list[InvoiceItem]
 
 
 def parse_args() -> argparse.Namespace:
@@ -63,7 +74,7 @@ def project_path(path_text: str) -> Path:
     path = Path(path_text)
     if path.is_absolute():
         return path
-    return PROJECT_DIR / path
+    return SCRIPT_DIR / path
 
 
 def find_pdfs(input_path: Path, recursive: bool) -> list[Path]:
@@ -202,7 +213,13 @@ def write_csv(output_path: Path, items: list[InvoiceItem]) -> None:
     with output_path.open("w", newline="", encoding="utf-8") as output_file:
         writer = csv.DictWriter(
             output_file,
-            fieldnames=["source_file", "invoice_date", "description", "quantity", "amount"],
+            fieldnames=[
+                "source_file",
+                "invoice_date",
+                "description",
+                "quantity",
+                "amount",
+            ],
         )
         writer.writeheader()
         for item in items:
@@ -217,13 +234,21 @@ def write_csv(output_path: Path, items: list[InvoiceItem]) -> None:
             )
 
 
-def main() -> int:
-    args = parse_args()
-    input_path = project_path(args.input)
-    output_path = project_path(args.output)
+def extract_items_core(
+    input_dir: str | Path = DEFAULT_INPUT_DIR,
+    output_file: str | Path = DEFAULT_OUTPUT_FILE,
+    recursive: bool = False,
+) -> ExtractResult:
+    """
+    Core extraction function - extracts invoice items from PDFs into CSV.
+
+    Returns an ExtractResult with count, CSV path, and items list.
+    """
+    input_path = project_path(input_dir)
+    output_path = project_path(output_file)
 
     try:
-        pdfs = find_pdfs(input_path, args.recursive)
+        pdfs = find_pdfs(input_path, recursive)
         if not pdfs:
             raise ExtractError(f"No PDF files found in {input_path}")
 
@@ -234,19 +259,32 @@ def main() -> int:
             items.extend(extracted)
 
         write_csv(output_path, items)
+        return ExtractResult(
+            count=len(items),
+            csv_path=output_path,
+            items=items,
+        )
     except ModuleNotFoundError as exc:
         if exc.name == "pdfplumber":
-            print(
-                "Error: missing dependency pdfplumber. Run: python3 -m pip install -r requirements.txt",
-                file=sys.stderr,
-            )
-            return 1
+            raise ExtractError(
+                "Missing dependency pdfplumber. Run: python3 -m pip install -r requirements.txt"
+            ) from exc
         raise
+
+
+def main() -> int:
+    args = parse_args()
+    try:
+        result = extract_items_core(
+            input_dir=args.input,
+            output_file=args.output,
+            recursive=args.recursive,
+        )
     except ExtractError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
-    print(f"Done. Wrote {len(items)} item(s) to {output_path}")
+    print(f"Done. Wrote {result.count} item(s) to {result.csv_path}")
     return 0
 
 

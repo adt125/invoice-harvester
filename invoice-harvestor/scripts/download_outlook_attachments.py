@@ -15,21 +15,36 @@ import json
 import os
 import re
 import sys
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterable
 from urllib.parse import quote
+from dotenv import load_dotenv, find_dotenv
 
+load_dotenv(find_dotenv())
 
 GRAPH_ROOT = "https://graph.microsoft.com/v1.0"
 DEFAULT_SCOPES = ["User.Read", "Mail.Read"]
-PROJECT_DIR = Path(__file__).resolve().parent
-DEFAULT_OUTPUT_DIR = PROJECT_DIR / "attachments"
+SCRIPT_DIR = Path(__file__).resolve().parent  # Points to 'scripts/'
+SKILL_ROOT = SCRIPT_DIR.parent
+ASSETS_DIR = SKILL_ROOT / "assets"
+TEMP_DIR = ASSETS_DIR / "temp"
+DEFAULT_OUTPUT_DIR = TEMP_DIR
 TOKEN_CACHE_FILE = Path.home() / ".outlook-attachment-downloader-token-cache.json"
 
 
 class GraphError(RuntimeError):
     pass
+
+
+@dataclass
+class DownloadResult:
+    """Result of downloading attachments."""
+
+    count: int
+    files: list[Path]
+    dry_run: bool
 
 
 def graph_quote(value: str) -> str:
@@ -39,13 +54,14 @@ def graph_quote(value: str) -> str:
 def parse_args() -> argparse.Namespace:
     from dotenv import load_dotenv
 
-    load_dotenv(PROJECT_DIR / ".env")
+    load_dotenv(dotenv_path=ASSETS_DIR / ".env")
     parser = argparse.ArgumentParser(
         description="Download Outlook attachments from a specific mail folder."
     )
     parser.add_argument(
         "--folder",
-        required=True,
+        required=False,
+        default="Instamart",
         help='Folder display name or path, for example "Invoices" or "Inbox/Invoices".',
     )
     parser.add_argument(
@@ -107,7 +123,9 @@ def parse_date(value: str, option_name: str) -> date:
     try:
         return datetime.strptime(value, "%Y-%m-%d").date()
     except ValueError as exc:
-        raise GraphError(f"{option_name} must use YYYY-MM-DD format, for example 2026-05-01.") from exc
+        raise GraphError(
+            f"{option_name} must use YYYY-MM-DD format, for example 2026-05-01."
+        ) from exc
 
 
 def previous_calendar_month(today: date | None = None) -> tuple[date, date]:
@@ -135,7 +153,9 @@ def received_date_prefix(received: str) -> str:
     if not received:
         return "unknown-date"
     try:
-        return datetime.fromisoformat(received.replace("Z", "+00:00")).strftime("%Y%m%d")
+        return datetime.fromisoformat(received.replace("Z", "+00:00")).strftime(
+            "%Y%m%d"
+        )
     except ValueError:
         return received[:10].replace("-", "") or "unknown-date"
 
@@ -194,7 +214,9 @@ def get_access_token(client_id: str, tenant_id: str) -> str:
     return result["access_token"]
 
 
-def graph_get(token: str, url: str, params: dict[str, str] | None = None) -> dict[str, Any]:
+def graph_get(
+    token: str, url: str, params: dict[str, str] | None = None
+) -> dict[str, Any]:
     import requests
 
     headers = {"Authorization": f"Bearer {token}"}
@@ -294,18 +316,54 @@ def message_matches(args: argparse.Namespace, message: dict[str, Any]) -> bool:
     return True
 
 
-def download_attachments(args: argparse.Namespace) -> int:
-    if not args.client_id:
-        raise GraphError("Missing --client-id or OUTLOOK_CLIENT_ID in .env.")
+def download_attachments_core(
+    folder: str,
+    client_id: str,
+    tenant_id: str = "common",
+    output_dir: str | Path = DEFAULT_OUTPUT_DIR,
+    from_date: date | None = None,
+    to_date: date | None = None,
+    last_month: bool = False,
+    subject_contains: str | None = None,
+    limit: int | None = None,
+    overwrite: bool = False,
+    dry_run: bool = False,
+) -> DownloadResult:
+    """
+    Core download function - extracts attachments from Outlook.
 
-    token = get_access_token(args.client_id, args.tenant_id)
-    folder_id = resolve_folder_id(token, args.folder)
-    output_dir = Path(args.output)
-    if not output_dir.is_absolute():
-        output_dir = PROJECT_DIR / output_dir
+    Returns a DownloadResult with count, file list, and dry_run status.
+    """
+    if not client_id:
+        raise GraphError(
+            "Missing client_id. Provide via parameter or OUTLOOK_CLIENT_ID env var."
+        )
 
-    if not args.dry_run:
-        output_dir.mkdir(parents=True, exist_ok=True)
+    # Create a namespace-like object for shared functions
+    class Args:
+        pass
+
+    args = Args()
+    args.folder = folder
+    args.client_id = client_id
+    args.tenant_id = tenant_id
+    args.output = str(output_dir)
+    args.from_date = from_date.isoformat() if from_date else None
+    args.to_date = to_date.isoformat() if to_date else None
+    args.last_month = last_month
+    args.subject_contains = subject_contains
+    args.limit = limit
+    args.overwrite = overwrite
+    args.dry_run = dry_run
+
+    token = get_access_token(client_id, tenant_id)
+    folder_id = resolve_folder_id(token, folder)
+    output_path = Path(output_dir)
+    if not output_path.is_absolute():
+        output_path = TEMP_DIR / output_path
+
+    if not dry_run:
+        output_path.mkdir(parents=True, exist_ok=True)
 
     messages_url = f"{GRAPH_ROOT}/me/mailFolders/{graph_quote(folder_id)}/messages"
     message_params = {
@@ -314,6 +372,7 @@ def download_attachments(args: argparse.Namespace) -> int:
         "$filter": build_message_filter(args),
     }
 
+    downloaded_files: list[Path] = []
     downloaded = 0
     inspected = 0
 
@@ -322,12 +381,14 @@ def download_attachments(args: argparse.Namespace) -> int:
             continue
 
         inspected += 1
-        if args.limit and inspected > args.limit:
+        if limit and inspected > limit:
             break
 
         subject = message.get("subject") or "(no subject)"
         received = message.get("receivedDateTime") or "unknown-date"
-        attachments_url = f"{GRAPH_ROOT}/me/messages/{graph_quote(message['id'])}/attachments"
+        attachments_url = (
+            f"{GRAPH_ROOT}/me/messages/{graph_quote(message['id'])}/attachments"
+        )
 
         for attachment in graph_pages(token, attachments_url, {"$top": "50"}):
             attachment_type = attachment.get("@odata.type", "")
@@ -349,26 +410,50 @@ def download_attachments(args: argparse.Namespace) -> int:
             filename = sanitize_filename(
                 f"{received_date_prefix(received)}_{detail.get('name') or 'attachment'}"
             )
-            target = output_dir / filename
-            if not args.overwrite:
+            target = output_path / filename
+            if not overwrite:
                 target = unique_path(target)
 
-            print(f"{'Would save' if args.dry_run else 'Saving'} {target} from {received}: {subject}")
-            if not args.dry_run:
+            print(
+                f"{'Would save' if dry_run else 'Saving'} {target} from {received}: {subject}"
+            )
+            if not dry_run:
                 target.write_bytes(base64.b64decode(content))
+
+            downloaded_files.append(target)
             downloaded += 1
 
-    return downloaded
+    return DownloadResult(
+        count=downloaded,
+        files=downloaded_files,
+        dry_run=dry_run,
+    )
 
 
 def main() -> int:
     args = parse_args()
     try:
-        count = download_attachments(args)
+        result = download_attachments_core(
+            folder=args.folder,
+            client_id=args.client_id,
+            tenant_id=args.tenant_id,
+            output_dir=args.output,
+            from_date=(
+                parse_date(args.from_date, "--from-date") if args.from_date else None
+            ),
+            to_date=parse_date(args.to_date, "--to-date") if args.to_date else None,
+            last_month=args.last_month,
+            subject_contains=args.subject_contains,
+            limit=args.limit,
+            overwrite=args.overwrite,
+            dry_run=args.dry_run,
+        )
     except GraphError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
-    print(f"Done. {'Matched' if args.dry_run else 'Downloaded'} {count} file attachment(s).")
+    print(
+        f"Done. {'Matched' if result.dry_run else 'Downloaded'} {result.count} file attachment(s)."
+    )
     return 0
 
 
