@@ -1,0 +1,5 @@
+.env
+attachments/*
+!attachments/.gitkeep
+__pycache__/
+.venv/
