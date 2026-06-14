@@ -23,7 +23,6 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 from typing import Optional
-from dotenv import load_dotenv, find_dotenv
 
 # Import core functions from sibling scripts
 from download_outlook_attachments import (
@@ -43,8 +42,6 @@ from push_to_google_sheets import (
     SheetsPushError,
 )
 from clean_up import cleanup_temp_files, CleanupResult
-
-load_dotenv(find_dotenv())
 
 SCRIPT_DIR = Path(__file__).resolve().parent  # Points to 'scripts/'
 SKILL_ROOT = SCRIPT_DIR.parent
@@ -114,7 +111,6 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
 
     try:
         config.validate()
-        print(f"config: {config}")
         # Step 1: Download
         print(f"[1/4] Downloading from Outlook folder '{config.folder}'...")
 
@@ -198,6 +194,9 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
 
 def parse_args() -> argparse.Namespace:
     """Parse command-line arguments."""
+    from dotenv import load_dotenv
+
+    load_dotenv(dotenv_path=ASSETS_DIR / ".env")
     parser = argparse.ArgumentParser(
         description="Invoice Harvester Pipeline: Download → Extract → Push"
     )

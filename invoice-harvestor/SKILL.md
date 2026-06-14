@@ -24,7 +24,7 @@ Install dependencies from the skill scripts directory:
 ```bash
 python3 -m venv .venv &&
 source .venv/bin/activate &&
-python3 -m pip install -r invoice-harvestor-skill/scripts/requirements.txt
+python3 -m pip install -r invoice-harvestor/scripts/requirements.txt
 ```
 
 ## End-to-End Run
@@ -32,7 +32,7 @@ python3 -m pip install -r invoice-harvestor-skill/scripts/requirements.txt
 Prefer the pipeline for normal use:
 
 ```bash
-python3 invoice-harvestor-skill/scripts/pipeline.py --folder "Instamart" --last-month --replace
+python3 invoice-harvestor/scripts/pipeline.py --folder "Instamart" --last-month --replace
 ```
 
 Useful flags:
@@ -52,25 +52,25 @@ The pipeline writes temporary PDFs and `invoice_items.csv` under `assets/temp`, 
 Download attachments only:
 
 ```bash
-python3 invoice-harvestor-skill/scripts/download_outlook_attachments.py --folder "Instamart" --last-month
+python3 invoice-harvestor/scripts/download_outlook_attachments.py --folder "Instamart" --last-month
 ```
 
 Add filters when needed:
 
 ```bash
-python3 invoice-harvestor-skill/scripts/download_outlook_attachments.py --folder "Inbox/Invoices" --from-date 2026-05-01 --to-date 2026-05-31 --subject-contains invoice --limit 25
+python3 invoice-harvestor/scripts/download_outlook_attachments.py --folder "Inbox/Invoices" --from-date 2026-05-01 --to-date 2026-05-31 --subject-contains invoice --limit 25
 ```
 
 Extract invoice items from PDFs:
 
 ```bash
-python3 invoice-harvestor-skill/scripts/extract_invoice_items.py --input invoice-harvestor-skill/assets/temp --output invoice-harvestor-skill/assets/temp/invoice_items.csv
+python3 invoice-harvestor/scripts/extract_invoice_items.py --input invoice-harvestor/assets/temp --output invoice-harvestor/assets/temp/invoice_items.csv
 ```
 
 Push CSV rows to Google Sheets:
 
 ```bash
-python3 invoice-harvestor-skill/scripts/push_to_google_sheets.py --input invoice-harvestor-skill/assets/temp/invoice_items.csv --replace
+python3 invoice-harvestor/scripts/push_to_google_sheets.py --input invoice-harvestor/assets/temp/invoice_items.csv --replace
 ```
 
 ## Data Shape

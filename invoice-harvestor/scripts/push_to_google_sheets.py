@@ -90,7 +90,7 @@ def project_path(path_text: str) -> Path:
     path = Path(path_text)
     if path.is_absolute():
         return path
-    return SCRIPT_DIR / path
+    return ASSETS_DIR / path
 
 
 def read_csv_rows(csv_path: Path) -> tuple[list[str], list[list[str]]]:
