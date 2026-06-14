@@ -1,4 +1,5 @@
 .env
+invoice-processor-499409-18f4bcaededa.json
 attachments/*
 !attachments/.gitkeep
 __pycache__/

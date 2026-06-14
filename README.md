@@ -106,6 +106,57 @@ You can also choose paths:
 python3 extract_invoice_items.py --input attachments --output invoice_items.csv
 ```
 
+## Push To Google Sheets
+
+To send `invoice_items.csv` to Google Sheets:
+
+1. Create a Google Cloud project.
+2. Enable the Google Sheets API.
+3. Create a service account.
+4. Download the service account JSON key into this project, for example:
+
+```text
+google-service-account.json
+```
+
+5. Open your target Google Sheet and share it with the service account email.
+   The email is inside the JSON file as `client_email`.
+6. Add these values to `.env`:
+
+```text
+GOOGLE_SERVICE_ACCOUNT_FILE=google-service-account.json
+GOOGLE_SHEET_ID=your-google-sheet-id
+GOOGLE_SHEET_RANGE=A:E
+```
+
+Append CSV rows to monthly sheets:
+
+```bash
+python3 push_to_google_sheets.py
+```
+
+Rows are grouped by `invoice_date`. For example, rows dated `2026-05-01` through `2026-05-31` go to a sheet tab named:
+
+```text
+2026-05
+```
+
+Missing monthly sheet tabs are created automatically.
+
+Replace each monthly sheet range with the latest CSV:
+
+```bash
+python3 push_to_google_sheets.py --replace
+```
+
+Full monthly workflow:
+
+```bash
+python3 download_outlook_attachments.py --folder "Invoices" --last-month
+python3 extract_invoice_items.py
+python3 push_to_google_sheets.py --replace
+```
+
 The first run prints a device-code login prompt. After login, the token cache is stored at:
 
 ```text
