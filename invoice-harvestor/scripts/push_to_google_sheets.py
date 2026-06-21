@@ -26,11 +26,11 @@ from dotenv import load_dotenv, find_dotenv
 load_dotenv(find_dotenv())
 
 SCRIPT_DIR = Path(__file__).resolve().parent  # Points to 'scripts/'
-SKILL_ROOT = SCRIPT_DIR.parent
-ASSETS_DIR = SKILL_ROOT / "assets"
+ROOT = SCRIPT_DIR.parent
+ASSETS_DIR = ROOT / "assets"
 TEMP_DIR = ASSETS_DIR / "temp"
-DEFAULT_INPUT_FILE = TEMP_DIR / "invoice_items.csv"
-DEFAULT_SHEET_COLUMNS = "A:E"
+DEFAULT_INPUT_FILE = TEMP_DIR / "tagged_expenses.csv"
+DEFAULT_SHEET_COLUMNS = "A:F"
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 
@@ -48,7 +48,7 @@ class PushResult:
 
 
 def parse_args() -> argparse.Namespace:
-    load_dotenv(ASSETS_DIR / ".env")
+    load_dotenv(ROOT / ".env")
 
     parser = argparse.ArgumentParser(
         description="Push invoice_items.csv to a Google Sheet."
@@ -302,7 +302,7 @@ def main() -> int:
             csv_file=args.input,
             service_account_file=args.service_account_file,
             sheet_id=args.sheet_id,
-            range_columns=args.range,
+            range_columns_var=args.range,
             replace=args.replace,
             include_header=args.include_header,
         )

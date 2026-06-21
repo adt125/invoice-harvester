@@ -27,8 +27,8 @@ load_dotenv(find_dotenv())
 GRAPH_ROOT = "https://graph.microsoft.com/v1.0"
 DEFAULT_SCOPES = ["User.Read", "Mail.Read"]
 SCRIPT_DIR = Path(__file__).resolve().parent  # Points to 'scripts/'
-SKILL_ROOT = SCRIPT_DIR.parent
-ASSETS_DIR = SKILL_ROOT / "assets"
+ROOT = SCRIPT_DIR.parent
+ASSETS_DIR = ROOT / "assets"
 TEMP_DIR = ASSETS_DIR / "temp"
 DEFAULT_OUTPUT_DIR = TEMP_DIR
 TOKEN_CACHE_FILE = Path.home() / ".outlook-attachment-downloader-token-cache.json"
@@ -54,7 +54,7 @@ def graph_quote(value: str) -> str:
 def parse_args() -> argparse.Namespace:
     from dotenv import load_dotenv
 
-    load_dotenv(dotenv_path=ASSETS_DIR / ".env")
+    load_dotenv(dotenv_path=ROOT / ".env")
     parser = argparse.ArgumentParser(
         description="Download Outlook attachments from a specific mail folder."
     )

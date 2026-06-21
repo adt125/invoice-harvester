@@ -3,8 +3,8 @@ import shutil
 from dataclasses import dataclass
 
 SCRIPT_DIR = Path(__file__).resolve().parent  # Points to 'scripts/'
-SKILL_ROOT = SCRIPT_DIR.parent
-ASSETS_DIR = SKILL_ROOT / "assets"
+ROOT = SCRIPT_DIR.parent
+ASSETS_DIR = ROOT / "assets"
 TEMP_DIR = ASSETS_DIR / "temp"
 
 

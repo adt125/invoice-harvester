@@ -44,8 +44,8 @@ from push_to_google_sheets import (
 from clean_up import cleanup_temp_files, CleanupResult
 
 SCRIPT_DIR = Path(__file__).resolve().parent  # Points to 'scripts/'
-SKILL_ROOT = SCRIPT_DIR.parent
-ASSETS_DIR = SKILL_ROOT / "assets"
+ROOT = SCRIPT_DIR.parent
+ASSETS_DIR = ROOT / "assets"
 TEMP_DIR = ASSETS_DIR / "temp"
 DEFAULT_OUTPUT_DIR = TEMP_DIR
 
@@ -196,7 +196,7 @@ def parse_args() -> argparse.Namespace:
     """Parse command-line arguments."""
     from dotenv import load_dotenv
 
-    load_dotenv(dotenv_path=ASSETS_DIR / ".env")
+    load_dotenv(dotenv_path=ROOT / ".env")
     parser = argparse.ArgumentParser(
         description="Invoice Harvester Pipeline: Download → Extract → Push"
     )

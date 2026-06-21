@@ -19,8 +19,8 @@ from pathlib import Path
 from typing import Any, Iterable
 
 SCRIPT_DIR = Path(__file__).resolve().parent  # Points to 'scripts/'
-SKILL_ROOT = SCRIPT_DIR.parent
-ASSETS_DIR = SKILL_ROOT / "assets"
+ROOT = SCRIPT_DIR.parent
+ASSETS_DIR = ROOT / "assets"
 TEMP_DIR = ASSETS_DIR / "temp"
 DEFAULT_INPUT_DIR = TEMP_DIR
 DEFAULT_OUTPUT_FILE = TEMP_DIR / "invoice_items.csv"
