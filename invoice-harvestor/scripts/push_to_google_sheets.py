@@ -19,18 +19,17 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from google.oauth2.service_account import Credentials
-from googleapiclient.discovery import build
-from dotenv import load_dotenv, find_dotenv
+from config import (
+    DEFAULT_GOOGLE_SHEET_COLUMNS,
+    DEFAULT_TAGGED_EXPENSES_CSV,
+    load_project_env,
+    resolve_from_assets,
+)
 
-load_dotenv(find_dotenv())
+load_project_env()
 
-SCRIPT_DIR = Path(__file__).resolve().parent  # Points to 'scripts/'
-ROOT = SCRIPT_DIR.parent
-ASSETS_DIR = ROOT / "assets"
-TEMP_DIR = ASSETS_DIR / "temp"
-DEFAULT_INPUT_FILE = TEMP_DIR / "tagged_expenses.csv"
-DEFAULT_SHEET_COLUMNS = "A:F"
+DEFAULT_INPUT_FILE = DEFAULT_TAGGED_EXPENSES_CSV
+DEFAULT_SHEET_COLUMNS = DEFAULT_GOOGLE_SHEET_COLUMNS
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 
@@ -48,7 +47,7 @@ class PushResult:
 
 
 def parse_args() -> argparse.Namespace:
-    load_dotenv(ROOT / ".env")
+    load_project_env()
 
     parser = argparse.ArgumentParser(
         description="Push invoice_items.csv to a Google Sheet."
@@ -87,10 +86,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def project_path(path_text: str) -> Path:
-    path = Path(path_text)
-    if path.is_absolute():
-        return path
-    return ASSETS_DIR / path
+    return resolve_from_assets(path_text)
 
 
 def read_csv_rows(csv_path: Path) -> tuple[list[str], list[list[str]]]:
@@ -155,6 +151,9 @@ def month_range(sheet_name: str, columns: str) -> str:
 
 
 def sheets_service(service_account_file: Path):
+    from google.oauth2.service_account import Credentials
+    from googleapiclient.discovery import build
+
     if not service_account_file.exists():
         raise SheetsPushError(
             f"Service account JSON file does not exist: {service_account_file}"

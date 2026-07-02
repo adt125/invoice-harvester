@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Unified invoice harvester pipeline: Download → Extract → Push
+Unified invoice harvester pipeline: Download → Extract → Tag → Push
 
-This orchestrates all three steps (download from Outlook, extract from PDFs,
-push to Google Sheets) with a single configuration and execution flow.
+This orchestrates download from Outlook, extraction from PDFs, LLM tagging,
+and push to Google Sheets with a single configuration and execution flow.
 
 Usage:
     python3 pipeline.py --folder "Invoices" --last-month --replace
@@ -41,7 +41,9 @@ from push_to_google_sheets import (
     PushResult,
     SheetsPushError,
 )
+from item_llm_tagging import tag_expenses_core
 from clean_up import cleanup_temp_files, CleanupResult
+from config import DEFAULT_TAG_CACHE_FILE
 
 SCRIPT_DIR = Path(__file__).resolve().parent  # Points to 'scripts/'
 ROOT = SCRIPT_DIR.parent
@@ -51,6 +53,7 @@ DEFAULT_OUTPUT_DIR = TEMP_DIR
 
 DEFAULT_ATTACHMENTS_DIR = TEMP_DIR
 DEFAULT_CSV_FILE = TEMP_DIR / "invoice_items.csv"
+DEFAULT_TAGGED_CSV_FILE = TEMP_DIR / "tagged_expenses.csv"
 
 
 @dataclass
@@ -66,6 +69,8 @@ class PipelineConfig:
     # Directory/file overrides
     attachments_dir: Path = field(default_factory=lambda: DEFAULT_ATTACHMENTS_DIR)
     csv_file: Path = field(default_factory=lambda: DEFAULT_CSV_FILE)
+    tagged_csv_file: Path = field(default_factory=lambda: DEFAULT_TAGGED_CSV_FILE)
+    tag_cache_file: Path = field(default_factory=lambda: DEFAULT_TAG_CACHE_FILE)
 
     # Execution flags
     last_month: bool = False
@@ -86,6 +91,7 @@ class PipelineResult:
 
     download: Optional[DownloadResult] = None
     extract: Optional[ExtractResult] = None
+    tagged_csv_path: Optional[Path] = None
     push: Optional[PushResult] = None
     clean_up: Optional[CleanupResult] = None
     success: bool = False
@@ -98,21 +104,22 @@ class PipelineResult:
         return f"""Pipeline Complete:
 - Downloaded: {self.download.count} file(s)
 - Extracted: {self.extract.count} item(s) to {self.extract.csv_path}
+- Tagged CSV: {self.tagged_csv_path}
 - Pushed: {self.push.rows_updated} row(s) to {len(self.push.sheets_modified)} sheet(s)"""
 
 
 def run_pipeline(config: PipelineConfig) -> PipelineResult:
     """
-    Execute: download → extract → push
+    Execute: download → extract → tag → push
 
-    Returns structured result with all three step outputs.
+    Returns structured result with the step outputs.
     Each step is optional; early exit if no data from previous step.
     """
 
     try:
         config.validate()
         # Step 1: Download
-        print(f"[1/4] Downloading from Outlook folder '{config.folder}'...")
+        print(f"[1/5] Downloading from Outlook folder '{config.folder}'...")
 
         # Calculate date range if needed
         from_date = None
@@ -140,7 +147,7 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
             )
 
         # Step 2: Extract
-        print(f"[2/4] Extracting invoices from {config.attachments_dir}...")
+        print(f"[2/5] Extracting invoices from {config.attachments_dir}...")
         extract_result = extract_items_core(
             input_dir=config.attachments_dir,
             output_file=config.csv_file,
@@ -156,10 +163,19 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
                 success=True,
             )
 
-        # Step 3: Push
-        print(f"[3/4] Pushing to Google Sheets (replace={config.replace})...")
+        # Step 3: Tag
+        print(f"[3/5] Tagging invoice items...")
+        tagged_csv_path = tag_expenses_core(
+            input_csv=config.csv_file,
+            output_csv=config.tagged_csv_file,
+            cache_file=config.tag_cache_file,
+        )
+        print(f"  ✓ Tagged items to {tagged_csv_path}")
+
+        # Step 4: Push
+        print(f"[4/5] Pushing to Google Sheets (replace={config.replace})...")
         push_result = push_to_sheets_core(
-            csv_file=config.csv_file,
+            csv_file=config.tagged_csv_file,
             service_account_file=config.google_service_account_file,
             sheet_id=config.google_sheet_id,
             replace=config.replace,
@@ -168,13 +184,14 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
             f"  ✓ Pushed {push_result.rows_updated} row(s) to {len(push_result.sheets_modified)} sheet(s)"
         )
 
-        # Step 4: Cleanup
-        print(f"[4/4] cleaning up temp file in {TEMP_DIR})...")
+        # Step 5: Cleanup
+        print(f"[5/5] cleaning up temp file in {TEMP_DIR})...")
         cleanup_result = cleanup_temp_files()
 
         return PipelineResult(
             download=download_result,
             extract=extract_result,
+            tagged_csv_path=tagged_csv_path,
             push=push_result,
             clean_up=cleanup_result,
             success=True,
@@ -198,7 +215,7 @@ def parse_args() -> argparse.Namespace:
 
     load_dotenv(dotenv_path=ROOT / ".env")
     parser = argparse.ArgumentParser(
-        description="Invoice Harvester Pipeline: Download → Extract → Push"
+        description="Invoice Harvester Pipeline: Download → Extract → Tag → Push"
     )
 
     parser.add_argument(
@@ -260,6 +277,16 @@ def parse_args() -> argparse.Namespace:
         default=str(DEFAULT_CSV_FILE),
         help=f"CSV output file (default: {DEFAULT_CSV_FILE})",
     )
+    parser.add_argument(
+        "--tagged-csv-file",
+        default=str(DEFAULT_TAGGED_CSV_FILE),
+        help=f"Tagged CSV output file (default: {DEFAULT_TAGGED_CSV_FILE})",
+    )
+    parser.add_argument(
+        "--tag-cache-file",
+        default=str(DEFAULT_TAG_CACHE_FILE),
+        help=f"Persistent tag cache file (default: {DEFAULT_TAG_CACHE_FILE})",
+    )
 
     return parser.parse_args()
 
@@ -277,6 +304,8 @@ def main() -> int:
             google_sheet_id=args.sheet_id,
             attachments_dir=Path(args.attachments_dir),
             csv_file=Path(args.csv_file),
+            tagged_csv_file=Path(args.tagged_csv_file),
+            tag_cache_file=Path(args.tag_cache_file),
             last_month=args.last_month,
             replace=args.replace,
             dry_run=args.dry_run,

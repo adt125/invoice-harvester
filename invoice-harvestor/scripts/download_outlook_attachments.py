@@ -20,17 +20,20 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterable
 from urllib.parse import quote
-from dotenv import load_dotenv, find_dotenv
 
-load_dotenv(find_dotenv())
+from config import (
+    DEFAULT_ATTACHMENTS_DIR,
+    DEFAULT_OUTLOOK_FOLDER,
+    DEFAULT_OUTLOOK_TENANT_ID,
+    load_project_env,
+    resolve_from_temp,
+)
+
+load_project_env()
 
 GRAPH_ROOT = "https://graph.microsoft.com/v1.0"
 DEFAULT_SCOPES = ["User.Read", "Mail.Read"]
-SCRIPT_DIR = Path(__file__).resolve().parent  # Points to 'scripts/'
-ROOT = SCRIPT_DIR.parent
-ASSETS_DIR = ROOT / "assets"
-TEMP_DIR = ASSETS_DIR / "temp"
-DEFAULT_OUTPUT_DIR = TEMP_DIR
+DEFAULT_OUTPUT_DIR = DEFAULT_ATTACHMENTS_DIR
 TOKEN_CACHE_FILE = Path.home() / ".outlook-attachment-downloader-token-cache.json"
 
 
@@ -52,16 +55,14 @@ def graph_quote(value: str) -> str:
 
 
 def parse_args() -> argparse.Namespace:
-    from dotenv import load_dotenv
-
-    load_dotenv(dotenv_path=ROOT / ".env")
+    load_project_env()
     parser = argparse.ArgumentParser(
         description="Download Outlook attachments from a specific mail folder."
     )
     parser.add_argument(
         "--folder",
         required=False,
-        default="Instamart",
+        default=DEFAULT_OUTLOOK_FOLDER,
         help='Folder display name or path, for example "Invoices" or "Inbox/Invoices".',
     )
     parser.add_argument(
@@ -76,7 +77,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--tenant-id",
-        default=os.environ.get("OUTLOOK_TENANT_ID", "common"),
+        default=os.environ.get("OUTLOOK_TENANT_ID", DEFAULT_OUTLOOK_TENANT_ID),
         help='Tenant ID, or "common" for work/school + personal Microsoft accounts. Can also use OUTLOOK_TENANT_ID in .env. Default: common',
     )
     parser.add_argument(
@@ -358,9 +359,7 @@ def download_attachments_core(
 
     token = get_access_token(client_id, tenant_id)
     folder_id = resolve_folder_id(token, folder)
-    output_path = Path(output_dir)
-    if not output_path.is_absolute():
-        output_path = TEMP_DIR / output_path
+    output_path = resolve_from_temp(output_dir)
 
     if not dry_run:
         output_path.mkdir(parents=True, exist_ok=True)

@@ -1,11 +1,7 @@
-from pathlib import Path
 import shutil
 from dataclasses import dataclass
 
-SCRIPT_DIR = Path(__file__).resolve().parent  # Points to 'scripts/'
-ROOT = SCRIPT_DIR.parent
-ASSETS_DIR = ROOT / "assets"
-TEMP_DIR = ASSETS_DIR / "temp"
+from config import TEMP_DIR
 
 
 @dataclass
@@ -20,8 +16,9 @@ def cleanup_temp_files() -> CleanupResult:
         if TEMP_DIR.exists():
             # Deletes the temp folder and every single file inside it
             shutil.rmtree(TEMP_DIR)
-            print("🧹 Cleanup complete! All temporary data files have been removed.")
+            print("Cleanup complete! All temporary data files have been removed.")
             return CleanupResult(success=True)
+        return CleanupResult(success=True)
     except Exception as e:
         print(f"Cleanup failed, error: {e}")
         return CleanupResult(success=False)

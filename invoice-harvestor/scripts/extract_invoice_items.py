@@ -18,12 +18,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable
 
-SCRIPT_DIR = Path(__file__).resolve().parent  # Points to 'scripts/'
-ROOT = SCRIPT_DIR.parent
-ASSETS_DIR = ROOT / "assets"
-TEMP_DIR = ASSETS_DIR / "temp"
-DEFAULT_INPUT_DIR = TEMP_DIR
-DEFAULT_OUTPUT_FILE = TEMP_DIR / "invoice_items.csv"
+from config import (
+    DEFAULT_ATTACHMENTS_DIR,
+    DEFAULT_INVOICE_ITEMS_CSV,
+    resolve_from_scripts,
+)
+
+DEFAULT_INPUT_DIR = DEFAULT_ATTACHMENTS_DIR
+DEFAULT_OUTPUT_FILE = DEFAULT_INVOICE_ITEMS_CSV
 
 
 class ExtractError(RuntimeError):
@@ -71,10 +73,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def project_path(path_text: str) -> Path:
-    path = Path(path_text)
-    if path.is_absolute():
-        return path
-    return SCRIPT_DIR / path
+    return resolve_from_scripts(path_text)
 
 
 def find_pdfs(input_path: Path, recursive: bool) -> list[Path]:
