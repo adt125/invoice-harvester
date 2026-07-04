@@ -55,7 +55,6 @@ def graph_quote(value: str) -> str:
 
 
 def parse_args() -> argparse.Namespace:
-    load_project_env()
     parser = argparse.ArgumentParser(
         description="Download Outlook attachments from a specific mail folder."
     )
