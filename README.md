@@ -1,173 +1,98 @@
-# Outlook Attachment Downloader
+# Invoice Harvester
 
-This script downloads file attachments from messages in a specific Outlook folder using Microsoft Graph.
-By default, downloaded attachments are saved into the project-local `attachments/` folder.
+Download invoice attachments from Outlook, extract invoice line items into CSV,
+tag each item with Gemini, and push the tagged rows to Google Sheets.
+
+## Pipeline Flow
+
+Running `scripts/pipeline.py` performs:
+
+1. Download invoice PDF attachments from an Outlook folder.
+2. Extract invoice items into `assets/temp/invoice_items.csv`.
+3. Tag each row and write `assets/temp/tagged_expenses.csv`.
+4. Push the tagged CSV to Google Sheets.
+5. Clean up temporary files.
+
+Item tags are cached in `assets/tag_cache.json`, so repeated descriptions in
+future monthly runs do not call the LLM again.
 
 ## Setup
 
-1. Create a Microsoft Entra app registration.
-2. In the app registration, enable public client/device-code authentication for mobile and desktop flows.
-3. Add delegated Microsoft Graph permissions:
-   - `User.Read`
-   - `Mail.Read`
-4. Copy the app/client ID.
-5. Create a `.env` file in this project:
+Create and activate a virtual environment:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+Create `.env` from the example:
 
 ```bash
 cp .env.example .env
 ```
 
-Then set:
+Fill in these values in `.env`:
 
-```text
+```bash
 OUTLOOK_CLIENT_ID=your-app-client-id
-OUTLOOK_TENANT_ID=consumers
-```
+OUTLOOK_TENANT_ID=common
 
-6. Install dependencies:
-
-```bash
-python3 -m pip install -r requirements.txt
-```
-
-## Usage
-
-```bash
-python3 download_outlook_attachments.py --folder "Invoices"
-```
-
-For a nested folder:
-
-```bash
-python3 download_outlook_attachments.py --folder "Inbox/Invoices"
-```
-
-Useful filters:
-
-```bash
-python3 download_outlook_attachments.py \
-  --folder "Invoices" \
-  --from-date 2026-05-01 \
-  --to-date 2026-05-31 \
-  --subject-contains "receipt"
-```
-
-Previous calendar month:
-
-```bash
-python3 download_outlook_attachments.py --folder "Invoices" --last-month
-```
-
-For example, if today is in June, `--last-month` uses May 1 through May 31.
-
-Downloaded files are prefixed with the message received date in `yyyyMMdd` format:
-
-```text
-attachments/20260501_invoice.pdf
-```
-
-`--since YYYY-MM-DD` is still supported as an alias for `--from-date`.
-
-To save somewhere else:
-
-```bash
-python3 download_outlook_attachments.py --folder "Invoices" --output downloads
-```
-
-Preview without downloading:
-
-```bash
-python3 download_outlook_attachments.py --folder "Invoices" --dry-run
-```
-
-## Extract Invoice Items
-
-After PDFs are downloaded into `attachments/`, extract line items into CSV:
-
-```bash
-python3 extract_invoice_items.py
-```
-
-Default output:
-
-```text
-invoice_items.csv
-```
-
-The CSV contains:
-
-```text
-source_file,invoice_date,description,quantity,amount
-```
-
-You can also choose paths:
-
-```bash
-python3 extract_invoice_items.py --input attachments --output invoice_items.csv
-```
-
-## Push To Google Sheets
-
-To send `invoice_items.csv` to Google Sheets:
-
-1. Create a Google Cloud project.
-2. Enable the Google Sheets API.
-3. Create a service account.
-4. Download the service account JSON key into this project, for example:
-
-```text
-google-service-account.json
-```
-
-5. Open your target Google Sheet and share it with the service account email.
-   The email is inside the JSON file as `client_email`.
-6. Add these values to `.env`:
-
-```text
 GOOGLE_SERVICE_ACCOUNT_FILE=google-service-account.json
 GOOGLE_SHEET_ID=your-google-sheet-id
-GOOGLE_SHEET_RANGE=A:E
+GOOGLE_SHEET_RANGE=A:F
+
+GOOGLE_GENAI_USE_VERTEXAI=0
+GOOGLE_API_KEY=your-gemini-api-key
 ```
 
-Append CSV rows to monthly sheets:
+The Google service account JSON path is resolved relative to `assets/` when it
+is not absolute, so `GOOGLE_SERVICE_ACCOUNT_FILE=google-service-account.json`
+expects `assets/google-service-account.json`.
+
+## Run The Pipeline
+
+Default run:
 
 ```bash
-python3 push_to_google_sheets.py
+python3 scripts/pipeline.py
 ```
 
-Rows are grouped by `invoice_date`. For example, rows dated `2026-05-01` through `2026-05-31` go to a sheet tab named:
-
-```text
-2026-05
-```
-
-Missing monthly sheet tabs are created automatically.
-
-Replace each monthly sheet range with the latest CSV:
+Common run for the previous calendar month:
 
 ```bash
-python3 push_to_google_sheets.py --replace
+python3 scripts/pipeline.py --last-month --replace
 ```
 
-Full monthly workflow:
+Use a specific Outlook folder:
 
 ```bash
-python3 download_outlook_attachments.py --folder "Invoices" --last-month
-python3 extract_invoice_items.py
-python3 push_to_google_sheets.py --replace
+python3 scripts/pipeline.py --folder "Instamart" --last-month --replace
 ```
 
-The first run prints a device-code login prompt. After login, the token cache is stored at:
+Preview the Outlook download step without writing attachments:
 
-```text
-~/.outlook-attachment-downloader-token-cache.json
+```bash
+python3 scripts/pipeline.py --dry-run
 ```
 
-## Notes
+## Useful Options
 
-- The script downloads only regular file attachments.
-- It skips embedded item attachments such as attached emails.
-- If a file already exists, the script adds a numeric suffix unless `--overwrite` is used.
-- If your app registration is configured for Microsoft personal accounts only, set `OUTLOOK_TENANT_ID=consumers`.
-- If your app registration is configured for work/school accounts, use `OUTLOOK_TENANT_ID=common`, `organizations`, or your tenant ID, depending on your Azure setup.
-- You can set `OUTLOOK_CLIENT_ID` and `OUTLOOK_TENANT_ID` in `.env`; command-line flags override `.env`.
+```bash
+python3 scripts/pipeline.py --folder "Instamart" --last-month --replace
+```
+
+`--replace` clears each monthly Google Sheet tab before writing. Without it,
+rows are appended.
+
+`--tagged-csv-file` controls the CSV that is pushed to Google Sheets after
+tagging. The default is `assets/temp/tagged_expenses.csv`.
+
+`--tag-cache-file` controls the persistent description-to-tag cache. The
+default is `assets/tag_cache.json`.
+
+For all flags:
+
+```bash
+python3 scripts/pipeline.py --help
+```

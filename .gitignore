@@ -5,5 +5,5 @@ attachments/*
 __pycache__/
 .venv/
 .vscode/
-.DS_store
-**assets/
+.DS_Store
+assets/
